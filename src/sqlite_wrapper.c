@@ -6,32 +6,32 @@
 
 #include "query_builder.h"
 
-static char *g_db_ErrMsg = NULL;
+static char *g_db_err_msg = NULL;
 
-static int64_t getTimeInMs() {
+static int64_t get_time_in_ms() {
   struct timeval now;
   gettimeofday(&now, NULL);
   return (int64_t)(now.tv_sec * 1000 + now.tv_usec / 1000);
 }
 
-static int tryExec(sqlite3 *db, const char *sql) {
+static int try_exec(sqlite3 *db, const char *sql) {
   printf("exec sql: %s\n", sql);
-  int64_t start = getTimeInMs();
-  int rc = sqlite3_exec(db, sql, NULL, NULL, &g_db_ErrMsg);
+  int64_t start = get_time_in_ms();
+  int rc = sqlite3_exec(db, sql, NULL, NULL, &g_db_err_msg);
   if (rc != SQLITE_OK) {
-    printf("SQL error: %s\n", g_db_ErrMsg);
-    sqlite3_free(g_db_ErrMsg);
-    g_db_ErrMsg = NULL;
+    printf("SQL error: %s\n", g_db_err_msg);
+    sqlite3_free(g_db_err_msg);
+    g_db_err_msg = NULL;
   } else {
     printf("Operation done successfully\n");
   }
 
-  printf("exec sql end (%lld ms)\n", getTimeInMs() - start);
+  printf("exec sql end (%lld ms)\n", get_time_in_ms() - start);
   return rc;
 }
 
-static void bindArguments(sqlite3_stmt *sqlit_stmt,
-                          db_content content) {
+static void bind_arguments(sqlite3_stmt *sqlit_stmt,
+                           db_content content) {
   db_content cur;
   int idx = 1;
   for (cur = content; cur != NULL; cur = content_next(cur), idx++) {
@@ -62,7 +62,7 @@ static void bindArguments(sqlite3_stmt *sqlit_stmt,
   }
 }
 
-static sqlite3_stmt *tryStep(sqlite3 *db, const char *sql) {
+static sqlite3_stmt *try_step(sqlite3 *db, const char *sql) {
   printf("try step sql: %s\n", sql);
   sqlite3_stmt *stmt = NULL;
   sqlite3_prepare_v2(db, sql, strlen(sql), &stmt, NULL);
@@ -82,13 +82,13 @@ static sqlite3_stmt *tryStep(sqlite3 *db, const char *sql) {
   return stmt;
 }
 
-static int trySingleStep(sqlite3 *db, const char *sql,
-                         db_content args) {
+static int try_single_step(sqlite3 *db, const char *sql,
+                           db_content args) {
   sqlite3_stmt *stmt = NULL;
   sqlite3_prepare_v2(db, sql, strlen(sql), &stmt, NULL);
   printf("try single step sql: %s\n", sql);
   if (args)
-    bindArguments(stmt, args);
+    bind_arguments(stmt, args);
 
   int rc = sqlite3_step(stmt);
   // Suppose used for UPDATA, INSTER, so no row return.
@@ -109,39 +109,11 @@ static void callback(void *udp, int type,
   *id = rowid;
 }
 
-#if defined(SQLITE_ENABLE_PREUPDATE_HOOK)
-static void preCallback(
-    void *pCtx,                   /* Copy of third arg to preupdate_hook() */
-    sqlite3 *db,                  /* Database handle */
-    int op,                       /* SQLITE_UPDATE, DELETE or INSERT */
-    char const *zDb,              /* Database name */
-    char const *zName,            /* Table name */
-    sqlite3_int64 iKey1,          /* Rowid of row about to be deleted/updated */
-    sqlite3_int64 iKey2           /* New rowid value (for a rowid UPDATE) */
-  ) {
-    int count = sqlite3_preupdate_count(db);
-    printf("db_name: %s, tbl_name: %s, type: %d, count: %d\n",
-        zDb, zName, op, count);
-
-    // process old and new value
-    for (int i = 0; i < count; i++) {
-        sqlite3_value* old;
-        sqlite3_preupdate_old(db, i, &old);
-        sqlite3_value* new;
-        sqlite3_preupdate_new(db, i, &new);
-    }
-}
-
-static void preUpdateCallback(sqlite3* db, void* udp) {
-    sqlite3_preupdate_hook(db, preCallback, udp);
-}
-#endif
-
-static void updateCallback(sqlite3 *db, void *udp) {
+static void update_callback(sqlite3 *db, void *udp) {
   sqlite3_update_hook(db, callback, udp);
 }
 
-static void disableCallback(sqlite3 *db) {
+static void disable_callback(sqlite3 *db) {
   sqlite3_update_hook(db, NULL, NULL);
 }
 
@@ -151,7 +123,7 @@ db_cursor db_query(sqlite3 *db, const char *table,
                    const char *limit) {
   string sql = build_query_string(false, table, columns,
                                   where, group_by, having, order_by, limit);
-  sqlite3_stmt *stmt = tryStep(db, string_get_data(sql));
+  sqlite3_stmt *stmt = try_step(db, string_get_data(sql));
   string_delete(sql);
   return stmt ? cursor_new(db, stmt) : NULL;
 }
@@ -159,35 +131,35 @@ db_cursor db_query(sqlite3 *db, const char *table,
 int db_update(sqlite3 *db, const char *table, db_content content,
               const char *where) {
   printf("update start =>\n");
-  int64_t start = getTimeInMs();
+  int64_t start = get_time_in_ms();
   string sql = buildUpdate(table, content, where);
-  int rc = trySingleStep(db, string_get_data(sql), content);
+  int rc = try_single_step(db, string_get_data(sql), content);
   string_delete(sql);
-  printf("=> update end (%lld ms)\n", getTimeInMs() - start);
+  printf("=> update end (%lld ms)\n", get_time_in_ms() - start);
   return rc;
 }
 
 int db_insert(sqlite3 *db, const char *table, db_content content) {
   printf("insert start =>\n");
-  int64_t start = getTimeInMs();
+  int64_t start = get_time_in_ms();
   string sql = buildInsert(table, content);
-  int rc = trySingleStep(db, string_get_data(sql), content);
+  int rc = try_single_step(db, string_get_data(sql), content);
   string_delete(sql);
-  printf("=> insert end (%lld ms)\n", getTimeInMs() - start);
+  printf("=> insert end (%lld ms)\n", get_time_in_ms() - start);
   return rc;
 }
 
 int db_delete(sqlite3 *db, const char *table, const char *where) {
   printf("delete start =>\n");
-  int64_t start = getTimeInMs();
+  int64_t start = get_time_in_ms();
   string sql = string_new();
   string_append(sql, "DELETE FROM ");
   string_append(sql, table);
   string_append(sql, " WHERE ");
   string_append(sql, where);
-  int rc = tryExec(db, string_get_data(sql));
+  int rc = try_exec(db, string_get_data(sql));
   string_delete(sql);
-  printf("=> delete end (%lld ms)\n", getTimeInMs() - start);
+  printf("=> delete end (%lld ms)\n", get_time_in_ms() - start);
   return rc;
 }
 
@@ -208,11 +180,11 @@ void db_deinit(sqlite3 *db) {
 }
 
 int db_exec_sql(sqlite3 *db, const char *sql) {
-  return tryExec(db, sql);
+  return try_exec(db, sql);
 }
 
 db_cursor db_query_sql(sqlite3 *db, const char *sql) {
-  sqlite3_stmt *stmt = tryStep(db, sql);
+  sqlite3_stmt *stmt = try_step(db, sql);
   return stmt ? cursor_new(db, stmt) : NULL;
 }
 
